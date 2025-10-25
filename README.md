@@ -11,7 +11,7 @@ This project is developed as part of a **Final Year Project (FYP)** using **Reac
 ## Features
 -  **User Authentication** – Secure login & signup with JWT  
 -  **Property Listings** – Verified houses/apartments with filters (shared room, girls-only, food-included, near colleges, etc.)  
--  **Student-Friendly Filters** – College distance, budget range, sharing options  
+-  **Student-Friendly Filters** – Male/Female, budget range, sharing options  
 -  **Digital Rent Agreement Generator** – Auto-generate agreements in PDF  
 -  **Real-Time Chat** – Direct messaging between students and landlords (Socket.io)  
 -  **AI Recommendations** – Suggests houses based on user preferences  
