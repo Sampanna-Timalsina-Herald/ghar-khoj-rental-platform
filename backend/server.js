@@ -12,7 +12,7 @@ import socketService from "./services/socket-service.js"
 // Load environment variables
 dotenv.config()
 
-// Import routes
+// Import routes for different modules
 import authRoutes from "./routes/auth.js"
 import listingsRoutes from "./routes/listings.js"
 import favoritesRoutes from "./routes/favorites.js"
@@ -21,6 +21,7 @@ import messagesRoutes from "./routes/messages.js"
 import agreementsRoutes from "./routes/agreements.js"
 import ratingsRoutes from "./routes/ratings.js"
 import adminRoutes from "./routes/admin.js"
+
 
 const app = express()
 const httpServer = createServer(app)
