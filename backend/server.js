@@ -1,3 +1,4 @@
+//Server.js - Main entry point for the Ghar Khoj Rental Platform backend server
 import express from "express"
 import cors from "cors"
 import dotenv from "dotenv"
@@ -21,6 +22,7 @@ import messagesRoutes from "./routes/messages.js"
 import agreementsRoutes from "./routes/agreements.js"
 import ratingsRoutes from "./routes/ratings.js"
 import adminRoutes from "./routes/admin.js"
+
 
 
 const app = express()
