@@ -1,0 +1,49 @@
+{
+  "name": "gharkhoj-backend",
+  "version": "1.0.0",
+  "description": "Tenant rental platform backend with PostgreSQL and AI recommendations",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "dev": "nodemon server.js",
+    "migrate": "node scripts/migrate.js",
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "axios": "latest",
+    "bcryptjs": "latest",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "cors": "latest",
+    "dotenv": "latest",
+    "express": "latest",
+    "express-validator": "latest",
+    "fs": "latest",
+    "http": "latest",
+    "jsonwebtoken": "latest",
+    "lucide-react": "^0.454.0",
+    "next": "16.0.1",
+    "nodemailer": "latest",
+    "path": "latest",
+    "pdfkit": "latest",
+    "pg": "latest",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "socket.io": "latest",
+    "socket.io-client": "^4.7.0",
+    "tailwind-merge": "^2.5.5",
+    "tailwindcss-animate": "^1.0.7",
+    "tw-animate-css": "latest",
+    "url": "latest",
+    "uuid": "latest"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "@types/react": "19.2.2",
+    "@types/react-dom": "19.2.2",
+    "nodemon": "^3.0.1",
+    "postcss": "^8.5",
+    "tailwindcss": "4.1.17",
+    "typescript": "^5"
+  }
+}
