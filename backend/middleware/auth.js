@@ -1,5 +1,95 @@
+// import { tokenManager } from "../utils/token-manager.js"
+// import User from "../models/User.js"
+
+// export const authMiddleware = async (req, res, next) => {
+//   try {
+//     const token = req.headers.authorization?.split(" ")[1]
+
+//     if (!token) {
+//       return res.status(401).json({
+//         success: false,
+//         error: "Authorization token required",
+//       })
+//     }
+
+//     // Verify token signature
+//     const decoded = tokenManager.verifyAccessToken(token)
+//     if (!decoded) {
+//       return res.status(401).json({
+//         success: false,
+//         error: "Invalid or expired token",
+//       })
+//     }
+
+//     // Verify session is active in database
+//     const session = await tokenManager.verifySession(token)
+//     if (!session) {
+//       return res.status(401).json({
+//         success: false,
+//         error: "Session not found or expired",
+//       })
+//     }
+
+//     // Get user from database
+//     const user = await User.findById(decoded.userId)
+//     if (!user || !user.is_active) {
+//       return res.status(401).json({
+//         success: false,
+//         error: "User not found or inactive",
+//       })
+//     }
+
+//     req.user = {
+//       userId: user.id,
+//       email: user.email,
+//       role: user.role,
+//       name: user.name,
+//     }
+//     req.token = token
+
+//     console.log("[AUTH] Authenticated user:", user.id, "Role:", user.role)
+//     next()
+//   } catch (error) {
+//     console.error("[AUTH] Middleware error:", error.message)
+//     res.status(401).json({
+//       success: false,
+//       error: "Authentication failed",
+//     })
+//   }
+// }
+
+// // Role-based middleware factories
+// export const requireRole = (allowedRoles) => {
+//   return (req, res, next) => {
+//     if (!req.user) {
+//       return res.status(401).json({
+//         success: false,
+//         error: "Authentication required",
+//       })
+//     }
+
+//     if (!allowedRoles.includes(req.user.role)) {
+//       return res.status(403).json({
+//         success: false,
+//         error: `Access denied. Required roles: ${allowedRoles.join(", ")}`,
+//       })
+//     }
+
+//     next()
+//   }
+// }
+
+// // Predefined role middlewares
+// export const adminOnly = requireRole(["admin"])
+// export const landlordOnly = requireRole(["landlord", "admin"])
+// export const tenantOnly = requireRole(["tenant", "admin"])
+// export const tenantOrLandlord = requireRole(["tenant", "landlord", "admin"])
+
+// // Backward compatibility alias
+// export const studentMiddleware = tenantOnly
+
+// export default authMiddleware
 import { tokenManager } from "../utils/token-manager.js"
-import User from "../models/User.js"
 
 export const authMiddleware = async (req, res, next) => {
   try {
@@ -9,56 +99,41 @@ export const authMiddleware = async (req, res, next) => {
       return res.status(401).json({ error: "No token provided" })
     }
 
-    // Verify token
-    const decoded = tokenManager.verifyAccessToken(token)
+    // Check if token is blacklisted
+    const isBlacklisted = await tokenManager.isTokenBlacklisted(token)
+    if (isBlacklisted) {
+      return res.status(401).json({ error: "Token has been revoked" })
+    }
+
+    const decoded = tokenManager.verifyToken(token)
     if (!decoded) {
       return res.status(401).json({ error: "Invalid or expired token" })
     }
 
-    // Check if session is active
-    const isActive = await tokenManager.isSessionActive(token)
-    if (!isActive) {
-      return res.status(401).json({ error: "Session expired" })
-    }
-
-    // Get user from database
-    const user = await User.findById(decoded.userId)
-    if (!user || !user.isActive) {
-      return res.status(401).json({ error: "User not found or inactive" })
-    }
-
-    req.user = {
-      userId: user._id,
-      email: user.email,
-      role: user.role,
-      name: user.name,
-    }
-    req.token = token
-
+    req.user = decoded
     next()
   } catch (error) {
-    console.error("Auth middleware error:", error)
-    res.status(500).json({ error: "Authentication failed" })
+    res.status(401).json({ error: "Authentication failed" })
   }
 }
 
-export const adminMiddleware = (req, res, next) => {
-  if (req.user?.role !== "admin") {
-    return res.status(403).json({ error: "Admin access required" })
+export const requireRole = (allowedRoles) => {
+  return (req, res, next) => {
+    if (!req.user) {
+      return res.status(401).json({ error: "Authentication required" })
+    }
+
+    if (!allowedRoles.includes(req.user.role)) {
+      return res.status(403).json({
+        error: `Access denied. Required roles: ${allowedRoles.join(", ")}`,
+      })
+    }
+
+    next()
   }
-  next()
 }
 
-export const landlordMiddleware = (req, res, next) => {
-  if (req.user?.role !== "landlord" && req.user?.role !== "admin") {
-    return res.status(403).json({ error: "Landlord access required" })
-  }
-  next()
-}
-
-export const studentMiddleware = (req, res, next) => {
-  if (req.user?.role !== "student" && req.user?.role !== "admin") {
-    return res.status(403).json({ error: "Student access required" })
-  }
-  next()
-}
+export const adminMiddleware = requireRole(["admin"])
+export const landlordMiddleware = requireRole(["landlord", "admin"])
+export const tenantMiddleware = requireRole(["tenant"])
+export const studentMiddleware = tenantMiddleware // backward compatibility alias
