@@ -300,137 +300,132 @@ export const authController = {
 
   // Login with role-based session
   async login(req, res, next) {
-    try {
-      const { email, password, role } = req.body
-      const ipAddress = getClientIP(req)
-      const userAgent = getUserAgent(req)
+  try {
+    const { email, password, role } = req.body
+    const ipAddress = getClientIP(req)
+    const userAgent = getUserAgent(req)
 
-      console.log("[AUTH] Login attempt for:", email, "Role:", role)
+    console.log("[AUTH] Login attempt for:", email, "Role:", role)
 
-      // Find user
-      const user = await User.findByEmail(email)
-      if (!user) {
-        await AuditLog.create({
-          userId: null,
-          action: "LOGIN",
-          email,
-          ipAddress,
-          userAgent,
-          status: "FAILED",
-          details: "User not found",
-        })
-        return res.status(401).json({
-          success: false,
-          error: "Invalid email or password",
-        })
-      }
+    // 1️⃣ Find user
+    const user = await User.findByEmail(email)
+    if (!user) {
+      await AuditLog.create({
+        userId: null,
+        action: "LOGIN",
+        email,
+        ipAddress,
+        userAgent,
+        status: "FAILED",
+        details: "User not found",
+      })
+      return res.status(401).json({ success: false, error: "Invalid email or password" })
+    }
 
-      // Check role match
-      if (user.role !== role) {
-        await AuditLog.create({
-          userId: user.id,
-          action: "LOGIN",
-          email,
-          ipAddress,
-          userAgent,
-          status: "FAILED",
-          details: `Role mismatch. Expected: ${user.role}, Got: ${role}`,
-        })
-        return res.status(401).json({
-          success: false,
-          error: `This account is registered as a ${user.role}, not a ${role}`,
-        })
-      }
+    // 2️⃣ Check role
+    if (user.role !== role) {
+      await AuditLog.create({
+        userId: user.id,
+        action: "LOGIN",
+        email,
+        ipAddress,
+        userAgent,
+        status: "FAILED",
+        details: `Role mismatch. Expected: ${user.role}, Got: ${role}`,
+      })
+      return res.status(401).json({
+        success: false,
+        error: `This account is registered as a ${user.role}, not a ${role}`,
+      })
+    }
 
-      // Check if active
-      if (!user.is_active) {
-        await AuditLog.create({
-          userId: user.id,
-          action: "LOGIN",
-          email,
-          ipAddress,
-          userAgent,
-          status: "FAILED",
-          details: "Account inactive",
-        })
-        return res.status(401).json({
-          success: false,
-          error: "Account is deactivated",
-        })
-      }
+    // 3️⃣ Check active and verified
+    if (!user.is_active) {
+      return res.status(401).json({ success: false, error: "Account is deactivated" })
+    }
+    if (!user.is_email_verified) {
+      return res.status(401).json({
+        success: false,
+        error: "Email not verified. Please verify with OTP first.",
+        requiresOTPVerification: true,
+        email: user.email,
+      })
+    }
 
-      // Check if verified
-      if (!user.is_email_verified) {
-        return res.status(401).json({
-          success: false,
-          error: "Email not verified. Please verify with OTP first.",
-          requiresOTPVerification: true,
-          email: user.email,
-        })
-      }
+    // 4️⃣ Verify password
+    const userWithPassword = await User.findByIdWithPassword(user.id)
+    const isPasswordValid = await User.verifyPassword(password, userWithPassword.password)
+    if (!isPasswordValid) {
+      await AuditLog.create({
+        userId: user.id,
+        action: "LOGIN",
+        email,
+        ipAddress,
+        userAgent,
+        status: "FAILED",
+        details: "Invalid password",
+      })
+      return res.status(401).json({ success: false, error: "Invalid email or password" })
+    }
 
-      // Get user with password for verification
-      const userWithPassword = await User.findByIdWithPassword(user.id)
-      const isPasswordValid = await User.verifyPassword(password, userWithPassword.password)
+    // 5️⃣ Generate tokens first
+    const accessToken = tokenManager.generateAccessToken(user.id, user.role)
+    const refreshToken = tokenManager.generateRefreshToken(user.id)
 
-      if (!isPasswordValid) {
-        await AuditLog.create({
-          userId: user.id,
-          action: "LOGIN",
-          email,
-          ipAddress,
-          userAgent,
-          status: "FAILED",
-          details: "Invalid password",
-        })
-        return res.status(401).json({
-          success: false,
-          error: "Invalid email or password",
-        })
-      }
+    // 6️⃣ Create session with tokens
+    const session = await tokenManager.createSession(
+      user.id,
+      accessToken,
+      refreshToken,
+      ipAddress,
+      userAgent
+    )
 
-      // Generate tokens
-      const accessToken = tokenManager.generateAccessToken(user.id, user.role)
-      const refreshToken = tokenManager.generateRefreshToken(user.id)
+    // 7️⃣ Set cookies
+    res.cookie("accessToken", accessToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      maxAge: 15 * 60 * 1000,
+      path: "/",
+    })
+    res.cookie("refreshToken", refreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+      path: "/",
+    })
 
-      // Create session
-      await tokenManager.createSession(user.id, accessToken, refreshToken, ipAddress, userAgent)
+    // 8️⃣ Log login success
+    await AuditLog.create({
+      userId: user.id,
+      action: "LOGIN",
+      email,
+      ipAddress,
+      userAgent,
+      status: "SUCCESS",
+    })
 
-      console.log("[AUTH] Login successful for:", email, "Role:", role)
-
-      // Send login notification (uncomment when ready)
-      //await emailService.sendLoginNotificationEmail(email, user.name, ipAddress)
-
-      // Log login
-      await AuditLog.create({
-        userId: user.id,
-        action: "LOGIN",
-        email,
-        ipAddress,
-        userAgent,
-        status: "SUCCESS",
-      })
-
-      res.json({
-        success: true,
-        message: "Login successful",
-        accessToken,
-        refreshToken,
-        user: {
-          id: user.id,
-          name: user.name,
-          email: user.email,
-          role: user.role,
-          profileImage: user.profile_image,
-          college: user.college,
-          city: user.city,
-        },
-      })
-    } catch (error) {
-      console.error("[AUTH] Login error:", error.message)
-      next(error)
-    }
-  },
+    // 9️⃣ Return user info (tokens are in cookies)
+    res.json({
+      success: true,
+      message: "Login successful",
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        profileImage: user.profile_image,
+        college: user.college,
+        city: user.city,
+      },
+    })
+  } catch (error) {
+    console.error("[AUTH] Login error:", error.message)
+    next(error)
+  }
+},
 
   // ---------------------------------------------------------------------
   // --- 3. Password Reset Flow (NEW) ---
@@ -611,82 +606,164 @@ export const authController = {
     }
   },
 
-  // Logout
-  async logout(req, res, next) {
-    try {
-      const token = req.token
-      const ipAddress = getClientIP(req)
-      const userAgent = getUserAgent(req)
+//   // Logout
+//   async logout(req, res, next) {
+//     try {
+//       const token = req.token
+//       const ipAddress = getClientIP(req)
+//       const userAgent = getUserAgent(req)
 
-      if (token) {
-        await tokenManager.revokeSession(token)
-      }
+//       if (token) {
+//         await tokenManager.revokeSession(token)
+//       }
 
-      // Log logout
-      await AuditLog.create({
-        userId: req.user.userId,
-        action: "LOGOUT",
-        email: req.user.email,
-        ipAddress,
-        userAgent,
-        status: "SUCCESS",
-      })
+//       // Log logout
+//       await AuditLog.create({
+//         userId: req.user.userId,
+//         action: "LOGOUT",
+//         email: req.user.email,
+//         ipAddress,
+//         userAgent,
+//         status: "SUCCESS",
+//       })
 
-      console.log("[AUTH] Logout for user:", req.user.userId)
+//       console.log("[AUTH] Logout for user:", req.user.userId)
 
-      res.json({
-        success: true,
-        message: "Logout successful",
-      })
-    } catch (error) {
-      console.error("[AUTH] Logout error:", error.message)
-      next(error)
-    }
-  },
+//       res.json({
+//         success: true,
+//         message: "Logout successful",
+//       })
+//     } catch (error) {
+//       console.error("[AUTH] Logout error:", error.message)
+//       next(error)
+//     }
+//   },
 
-  // Refresh token
-  async refreshToken(req, res, next) {
-    try {
-      const { refreshToken } = req.body
+//   // Refresh token
+//   async refreshToken(req, res, next) {
+//     try {
+//       const { refreshToken } = req.body
 
-      if (!refreshToken) {
-        return res.status(400).json({
-          success: false,
-          error: "Refresh token required",
-        })
-      }
+//       if (!refreshToken) {
+//         return res.status(400).json({
+//           success: false,
+//           error: "Refresh token required",
+//         })
+//       }
 
-      const decoded = tokenManager.verifyRefreshToken(refreshToken)
-      if (!decoded) {
-        return res.status(401).json({
-          success: false,
-          error: "Invalid or expired refresh token",
-        })
-      }
+//       const decoded = tokenManager.verifyRefreshToken(refreshToken)
+//       if (!decoded) {
+//         return res.status(401).json({
+//           success: false,
+//           error: "Invalid or expired refresh token",
+//         })
+//       }
 
-      // Get user
-      const user = await User.findById(decoded.userId)
-      if (!user || !user.is_active) {
-        return res.status(404).json({
-          success: false,
-          error: "User not found or inactive",
-        })
-      }
+//       // Get user
+//       const user = await User.findById(decoded.userId)
+//       if (!user || !user.is_active) {
+//         return res.status(404).json({
+//           success: false,
+//           error: "User not found or inactive",
+//         })
+//       }
 
-      // Generate new access token
-      const newAccessToken = tokenManager.generateAccessToken(user.id, user.role)
+//       // Generate new access token
+//       const newAccessToken = tokenManager.generateAccessToken(user.id, user.role)
 
-      console.log("[AUTH] Token refreshed for user:", user.id)
+//       console.log("[AUTH] Token refreshed for user:", user.id)
 
-      res.json({
-        success: true,
-        accessToken: newAccessToken,
-      })
-    } catch (error) {
-      console.error("[AUTH] Refresh token error:", error.message)
-      next(error)
-    }
-  },
+//       res.json({
+//         success: true,
+//         accessToken: newAccessToken,
+//       })
+//     } catch (error) {
+//       console.error("[AUTH] Refresh token error:", error.message)
+//       next(error)
+//     }
+//   },
+async logout(req, res, next) {
+    try {
+      const token = req.token
+      const ipAddress = getClientIP(req)
+      const userAgent = getUserAgent(req)
+
+      if (token) {
+        await tokenManager.revokeSession(token)
+      }
+
+      // Clear cookies
+      res.clearCookie("accessToken", { path: "/" })
+      res.clearCookie("refreshToken", { path: "/" })
+
+      // Log logout
+      await AuditLog.create({
+        userId: req.user?.userId || null,
+        action: "LOGOUT",
+        email: req.user?.email || null,
+        ipAddress,
+        userAgent,
+        status: "SUCCESS",
+      })
+
+      console.log("[AUTH] Logout for user:", req.user?.userId)
+
+      res.json({
+        success: true,
+        message: "Logout successful",
+      })
+    } catch (error) {
+      console.error("[AUTH] Logout error:", error.message)
+      next(error)
+    }
+  },
+
+  // Refresh token
+  // Refresh token
+async refreshToken(req, res, next) {
+  try {
+    const refreshToken = req.cookies?.refreshToken || req.body?.refreshToken
+    if (!refreshToken)
+      return res.status(400).json({ success: false, error: "Refresh token required" })
+
+    const decoded = tokenManager.verifyRefreshToken(refreshToken)
+    if (!decoded || !decoded.sessionId)
+      return res.status(401).json({ success: false, error: "Invalid or expired refresh token" })
+
+    // Get session
+    const session = await tokenManager.getSession(decoded.sessionId)
+    if (!session)
+      return res.status(401).json({ success: false, error: "Session not found" })
+
+    // Get user
+    const user = await User.findById(decoded.userId)
+    if (!user || !user.is_active)
+      return res.status(404).json({ success: false, error: "User not found or inactive" })
+
+    // Generate new access token WITH sessionId
+    const newAccessToken = tokenManager.generateAccessToken(user.id, user.role, session._id)
+
+    // Save new access token in session
+    session.token = newAccessToken
+    await session.save()
+
+    // Set cookie
+    res.cookie("accessToken", newAccessToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      maxAge: 15 * 60 * 1000, // 15 minutes
+      path: "/",
+    })
+
+    console.log("[AUTH] Token refreshed for user:", user.id)
+
+    res.json({ success: true, accessToken: newAccessToken })
+  } catch (error) {
+    console.error("[AUTH] Refresh token error:", error.message)
+    next(error)
+  }
+},
 }
 
 export default authController
