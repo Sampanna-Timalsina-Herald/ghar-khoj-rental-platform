@@ -22,91 +22,187 @@ export const authController = {
   // --- 1. Registration & OTP ---
   // ---------------------------------------------------------------------
   // Register user with OTP
-  async register(req, res, next) {
-    try {
-      const { email, password, name, role } = req.body
-      const ipAddress = getClientIP(req)
-      const userAgent = getUserAgent(req)
+//   async register(req, res, next) {
+//     try {
+//       const { email, password, name, role } = req.body
+//       const ipAddress = getClientIP(req)
+//       const userAgent = getUserAgent(req)
 
-      console.log("[AUTH] Registration attempt for:", email, "Role:", role)
+//       console.log("[AUTH] Registration attempt for:", email, "Role:", role)
 
-      // Check if user exists
-      const existingUser = await User.findByEmail(email)
-      if (existingUser) {
-        await AuditLog.create({
-          userId: null,
-          action: "REGISTER",
-          email,
-          ipAddress,
-          userAgent,
-          status: "FAILED",
-          details: "Email already exists",
-        })
-        return res.status(400).json({
-          success: false,
-          error: "Email already registered",
-        })
-      }
+//       // Check if user exists
+//       const existingUser = await User.findByEmail(email)
+//       if (existingUser) {
+//         await AuditLog.create({
+//           userId: null,
+//           action: "REGISTER",
+//           email,
+//           ipAddress,
+//           userAgent,
+//           status: "FAILED",
+//           details: "Email already exists",
+//         })
+//         return res.status(400).json({
+//           success: false,
+//           error: "Email already registered",
+//         })
+//       }
 
-      // Validate password strength
-      const passwordStrength = validatePasswordStrength(password)
-      if (!passwordStrength.isStrong) {
-        return res.status(400).json({
-          success: false,
-          error: "Password does not meet security requirements",
-          requirements: passwordStrength.requirements,
-        })
-      }
+//       // Validate password strength
+//       const passwordStrength = validatePasswordStrength(password)
+//       if (!passwordStrength.isStrong) {
+//         return res.status(400).json({
+//           success: false,
+//           error: "Password does not meet security requirements",
+//           requirements: passwordStrength.requirements,
+//         })
+//       }
 
-      // Create user
-      const user = await User.create({
-        name,
-        email: email.toLowerCase(),
-        password,
-        role: role || "tenant",
-      })
+//       // Create user
+//       const user = await User.create({
+//         name,
+//         email: email.toLowerCase(),
+//         password,
+//         role: role || "tenant",
+//       })
 
-      console.log("[AUTH] User created:", user.id)
+//       console.log("[AUTH] User created:", user.id)
 
-      // Generate and send OTP
-      const otp = generateOTP()
-      const expiresAt = getOTPExpiry()
+//       // Generate and send OTP
+//       const otp = generateOTP()
+//       const expiresAt = getOTPExpiry()
 
-      await OTP.create({
-        email: email.toLowerCase(),
-        otp,
-        expiresAt,
-      })
+//       await OTP.create({
+//         email: email.toLowerCase(),
+//         otp,
+//         expiresAt,
+//       })
 
-      console.log("[AUTH] OTP generated for:", email)
+//       console.log("[AUTH] OTP generated for:", email)
 
-      // Send OTP email
-      await emailService.sendOTPEmail(email, otp, name)
+//       // Send OTP email
+//       await emailService.sendOTPEmail(email, otp, name)
 
-      // Log registration
-      await AuditLog.create({
-        userId: user.id,
-        action: "REGISTER",
-        email,
-        ipAddress,
-        userAgent,
-        status: "SUCCESS",
-      })
+//       // Log registration
+//       await AuditLog.create({
+//         userId: user.id,
+//         action: "REGISTER",
+//         email,
+//         ipAddress,
+//         userAgent,
+//         status: "SUCCESS",
+//       })
 
-      res.status(201).json({
-        success: true,
-        message: "Registration successful. Please verify your email with OTP.",
-        userId: user.id,
-        email: user.email,
-        role: user.role,
-        requiresOTPVerification: true,
-      })
-    } catch (error) {
-      console.error("[AUTH] Register error:", error.message)
-      next(error)
-    }
-  },
+//       res.status(201).json({
+//         success: true,
+//         message: "Registration successful. Please verify your email with OTP.",
+//         userId: user.id,
+//         email: user.email,
+//         role: user.role,
+//         requiresOTPVerification: true,
+//       })
+//     } catch (error) {
+//       console.error("[AUTH] Register error:", error.message)
+//       next(error)
+//     }
+//   },
+  async register(req, res, next) {
+    try {
+      // 🟢 CHANGE: Added 'phone' to the destructuring
+      const { email, password, name, role, phone } = req.body
+      const ipAddress = getClientIP(req)
+      const userAgent = getUserAgent(req)
 
+      console.log("[AUTH] Registration attempt for:", email, "Role:", role)
+
+      // Check if user exists
+      const existingUser = await User.findByEmail(email)
+      if (existingUser) {
+        await AuditLog.create({
+          userId: null,
+          action: "REGISTER",
+          email,
+          ipAddress,
+          userAgent,
+          status: "FAILED",
+          details: "Email already exists",
+        })
+        return res.status(400).json({
+          success: false,
+          error: "Email already registered",
+        })
+      }
+
+      // 🟢 CHANGE: Enhanced Password Validation Response
+      const passwordStrength = validatePasswordStrength(password)
+      if (!passwordStrength.isStrong) {
+        // The validatePasswordStrength utility must return 'isStrong' (bool) and
+        // 'requirements' (array of strings, including "Password is Weak", "Medium", or "Strong",
+        // and detailed requirements like "Must contain a special character").
+        // Your current code implies this structure, so we just ensure the response is
+        // helpful for the client to show live feedback.
+        return res.status(400).json({
+          success: false,
+          error: "Password does not meet security requirements",
+          // The requirements property is what should contain the detailed messages.
+          requirements: passwordStrength.requirements,
+          // You can also add a general strength indicator based on the utility's output
+          strength: passwordStrength.strength || 'Weak', // e.g., 'Weak', 'Medium', 'Strong'
+        })
+      }
+
+      // Create user
+      const user = await User.create({
+        name,
+        email: email.toLowerCase(),
+        password,
+        role: role || "tenant",
+        // 🟢 CHANGE: Added phone to user creation
+        phone,
+      })
+
+      console.log("[AUTH] User created:", user.id)
+
+      // Generate and send OTP
+      const otp = generateOTP()
+      const expiresAt = getOTPExpiry()
+
+      await OTP.create({
+        email: email.toLowerCase(),
+        otp,
+        expiresAt,
+      })
+
+      console.log("[AUTH] OTP generated for:", email)
+
+      // Send OTP email
+      await emailService.sendOTPEmail(email, otp, name)
+
+      // Log registration
+      await AuditLog.create({
+        userId: user.id,
+        action: "REGISTER",
+        email,
+        ipAddress,
+        userAgent,
+        status: "SUCCESS",
+      })
+
+      res.status(201).json({
+        success: true,
+        message: "Registration successful. Please verify your email with OTP.",
+        userId: user.id,
+        email: user.email,
+        role: user.role,
+        // 🟢 CHANGE: Added phone to registration success response
+        phone: user.phone, 
+        requiresOTPVerification: true,
+      })
+    } catch (error) {
+      console.error("[AUTH] Register error:", error.message)
+      next(error)
+    }
+  },
   // Verify OTP
   async verifyOTP(req, res, next) {
     try {
@@ -605,83 +701,6 @@ export const authController = {
       next(error)
     }
   },
-
-//   // Logout
-//   async logout(req, res, next) {
-//     try {
-//       const token = req.token
-//       const ipAddress = getClientIP(req)
-//       const userAgent = getUserAgent(req)
-
-//       if (token) {
-//         await tokenManager.revokeSession(token)
-//       }
-
-//       // Log logout
-//       await AuditLog.create({
-//         userId: req.user.userId,
-//         action: "LOGOUT",
-//         email: req.user.email,
-//         ipAddress,
-//         userAgent,
-//         status: "SUCCESS",
-//       })
-
-//       console.log("[AUTH] Logout for user:", req.user.userId)
-
-//       res.json({
-//         success: true,
-//         message: "Logout successful",
-//       })
-//     } catch (error) {
-//       console.error("[AUTH] Logout error:", error.message)
-//       next(error)
-//     }
-//   },
-
-//   // Refresh token
-//   async refreshToken(req, res, next) {
-//     try {
-//       const { refreshToken } = req.body
-
-//       if (!refreshToken) {
-//         return res.status(400).json({
-//           success: false,
-//           error: "Refresh token required",
-//         })
-//       }
-
-//       const decoded = tokenManager.verifyRefreshToken(refreshToken)
-//       if (!decoded) {
-//         return res.status(401).json({
-//           success: false,
-//           error: "Invalid or expired refresh token",
-//         })
-//       }
-
-//       // Get user
-//       const user = await User.findById(decoded.userId)
-//       if (!user || !user.is_active) {
-//         return res.status(404).json({
-//           success: false,
-//           error: "User not found or inactive",
-//         })
-//       }
-
-//       // Generate new access token
-//       const newAccessToken = tokenManager.generateAccessToken(user.id, user.role)
-
-//       console.log("[AUTH] Token refreshed for user:", user.id)
-
-//       res.json({
-//         success: true,
-//         accessToken: newAccessToken,
-//       })
-//     } catch (error) {
-//       console.error("[AUTH] Refresh token error:", error.message)
-//       next(error)
-//     }
-//   },
 async logout(req, res, next) {
     try {
       const token = req.token
