@@ -5,6 +5,7 @@ import { emailService } from "../utils/email-service.js"
 import { generateOTP, getOTPExpiry } from "../utils/otp-generator.js"
 import { tokenManager } from "../utils/token-manager.js"
 import { validatePasswordStrength } from "../utils/password-validator.js"
+import { registrationCacheManager } from "../utils/registration-cache.js"
 import crypto from 'crypto' // Essential for generating and hashing reset tokens
 
 // Helper function to extract client IP address
@@ -136,36 +137,33 @@ export const authController = {
       // 🟢 CHANGE: Enhanced Password Validation Response
       const passwordStrength = validatePasswordStrength(password)
       if (!passwordStrength.isStrong) {
-        // The validatePasswordStrength utility must return 'isStrong' (bool) and
-        // 'requirements' (array of strings, including "Password is Weak", "Medium", or "Strong",
-        // and detailed requirements like "Must contain a special character").
-        // Your current code implies this structure, so we just ensure the response is
-        // helpful for the client to show live feedback.
         return res.status(400).json({
           success: false,
           error: "Password does not meet security requirements",
-          // The requirements property is what should contain the detailed messages.
           requirements: passwordStrength.requirements,
-          // You can also add a general strength indicator based on the utility's output
-          strength: passwordStrength.strength || 'Weak', // e.g., 'Weak', 'Medium', 'Strong'
+          strength: passwordStrength.strength || 'Weak',
         })
       }
 
-      // Create user
-      const user = await User.create({
+      // 🟢 CHANGE: Don't create user yet - store registration data in memory cache
+      // Generate and send OTP
+      const otp = generateOTP()
+      const expiresAt = getOTPExpiry()
+
+      // Store registration data temporarily in memory cache (expires with OTP)
+      const registrationData = {
         name,
         email: email.toLowerCase(),
         password,
         role: role || "tenant",
-        // 🟢 CHANGE: Added phone to user creation
         phone,
-      })
+      }
 
-      console.log("[AUTH] User created:", user.id)
+      // Store in memory cache with expiration matching OTP expiry
+      registrationCacheManager.set(email.toLowerCase(), registrationData, expiresAt)
 
-      // Generate and send OTP
-      const otp = generateOTP()
-      const expiresAt = getOTPExpiry()
+      // Delete any existing OTP for this email first
+      await OTP.deleteByEmail(email.toLowerCase())
 
       await OTP.create({
         email: email.toLowerCase(),
@@ -173,29 +171,26 @@ export const authController = {
         expiresAt,
       })
 
-      console.log("[AUTH] OTP generated for:", email)
+      console.log("[AUTH] OTP generated for registration:", email)
 
       // Send OTP email
       await emailService.sendOTPEmail(email, otp, name)
 
-      // Log registration
+      // Log registration attempt (no user ID yet)
       await AuditLog.create({
-        userId: user.id,
+        userId: null,
         action: "REGISTER",
         email,
         ipAddress,
         userAgent,
-        status: "SUCCESS",
+        status: "PENDING",
+        details: "Registration data stored in cache, awaiting OTP verification",
       })
 
       res.status(201).json({
         success: true,
-        message: "Registration successful. Please verify your email with OTP.",
-        userId: user.id,
-        email: user.email,
-        role: user.role,
-        // 🟢 CHANGE: Added phone to registration success response
-        phone: user.phone, 
+        message: "OTP sent to your email. Please verify to complete registration.",
+        email: email.toLowerCase(),
         requiresOTPVerification: true,
       })
     } catch (error) {
@@ -203,144 +198,281 @@ export const authController = {
       next(error)
     }
   },
-  // Verify OTP
-  async verifyOTP(req, res, next) {
-    try {
-      const { email, otp } = req.body
-      const ipAddress = getClientIP(req)
-      const userAgent = getUserAgent(req)
+  // Verify OTP
+  async verifyOTP(req, res, next) {
+    try {
+      const { email, otp } = req.body
+      const ipAddress = getClientIP(req)
+      const userAgent = getUserAgent(req)
 
-      console.log("[AUTH] OTP verification attempt for:", email)
+      console.log("[AUTH] OTP verification attempt for:", email)
 
-      // Find user
-      const user = await User.findByEmail(email)
-      if (!user) {
-        return res.status(404).json({
-          success: false,
-          error: "User not found",
-        })
-      }
+      // Get OTP record with registration data
+      const otpRecord = await OTP.findByEmailAndOTP(email.toLowerCase(), otp)
 
-      // Check if already verified
-      if (user.is_email_verified) {
-        return res.status(400).json({
-          success: false,
-          error: "Email already verified",
-        })
-      }
+      if (!otpRecord) {
+        await AuditLog.create({
+          userId: null,
+          action: "OTP_VERIFY",
+          email,
+          ipAddress,
+          userAgent,
+          status: "FAILED",
+          details: "Invalid OTP",
+        })
+        return res.status(400).json({
+          success: false,
+          error: "Invalid or expired OTP",
+        })
+      }
 
-      // Get OTP record
-      const otpRecord = await OTP.findByEmailAndOTP(email.toLowerCase(), otp)
+      // Check attempts
+      if (otpRecord.attempts >= otpRecord.max_attempts) {
+        await AuditLog.create({
+          userId: null,
+          action: "OTP_VERIFY",
+          email,
+          ipAddress,
+          userAgent,
+          status: "FAILED",
+          details: "Max attempts exceeded",
+        })
+        return res.status(400).json({
+          success: false,
+          error: "Too many attempts. Request a new OTP.",
+        })
+      }
 
-      if (!otpRecord) {
-        await AuditLog.create({
-          userId: user.id,
-          action: "OTP_VERIFY",
-          email,
-          ipAddress,
-          userAgent,
-          status: "FAILED",
-          details: "Invalid OTP",
-        })
-        return res.status(400).json({
-          success: false,
-          error: "Invalid OTP",
-        })
-      }
+      // 🟢 NEW: Check if this is a new registration (has data in cache) or existing user verification
+      const registrationData = registrationCacheManager.get(email.toLowerCase())
+      
+      if (registrationData) {
+        // New registration - create user now
+        // Check if user was created in the meantime (race condition)
+        let user = await User.findByEmail(email)
+        
+        if (!user) {
+          // Create the user
+          user = await User.create({
+            name: registrationData.name,
+            email: registrationData.email,
+            password: registrationData.password,
+            role: registrationData.role,
+            phone: registrationData.phone,
+          })
+          console.log("[AUTH] User created after OTP verification:", user.id)
+          
+          // Remove registration data from cache
+          registrationCacheManager.delete(email.toLowerCase())
+        } else {
+          // User exists but not verified - mark as verified
+          if (!user.is_email_verified) {
+            await User.updateEmailVerification(user.id)
+          }
+          // Remove registration data from cache
+          registrationCacheManager.delete(email.toLowerCase())
+        }
 
-      // Check attempts
-      if (otpRecord.attempts >= otpRecord.max_attempts) {
-        await AuditLog.create({
-          userId: user.id,
-          action: "OTP_VERIFY",
-          email,
-          ipAddress,
-          userAgent,
-          status: "FAILED",
-          details: "Max attempts exceeded",
-        })
-        return res.status(400).json({
-          success: false,
-          error: "Too many attempts. Request a new OTP.",
-        })
-      }
+        // Delete OTP record
+        await OTP.deleteByEmail(email.toLowerCase())
 
-      // Mark user as verified
-      await User.updateEmailVerification(user.id)
-      await OTP.deleteByEmail(email.toLowerCase())
+        // Send verification success email
+        await emailService.sendVerificationSuccessEmail(email, user.name)
 
-      console.log("[AUTH] Email verified for:", email)
+        // Log verification
+        await AuditLog.create({
+          userId: user.id,
+          action: "OTP_VERIFY",
+          email,
+          ipAddress,
+          userAgent,
+          status: "SUCCESS",
+          details: "User created and verified",
+        })
 
-      // Send verification success email
-      await emailService.sendVerificationSuccessEmail(email, user.name)
+        // Generate tokens for auto-login
+        const accessToken = tokenManager.generateAccessToken(user.id, user.role)
+        const refreshToken = tokenManager.generateRefreshToken(user.id)
 
-      // Log verification
-      await AuditLog.create({
-        userId: user.id,
-        action: "OTP_VERIFY",
-        email,
-        ipAddress,
-        userAgent,
-        status: "SUCCESS",
-      })
+        // Create session
+        await tokenManager.createSession(
+          user.id,
+          accessToken,
+          refreshToken,
+          ipAddress,
+          userAgent
+        )
 
-      res.json({
-        success: true,
-        message: "Email verified successfully. You can now login.",
-        user: {
-          id: user.id,
-          name: user.name,
-          email: user.email,
-          role: user.role,
-        },
-      })
+        // Set cookies
+        res.cookie("accessToken", accessToken, {
+          httpOnly: true,
+          secure: process.env.NODE_ENV === "production",
+          sameSite: "lax",
+          maxAge: 15 * 60 * 1000,
+          path: "/",
+        })
+        res.cookie("refreshToken", refreshToken, {
+          httpOnly: true,
+          secure: process.env.NODE_ENV === "production",
+          sameSite: "lax",
+          maxAge: 7 * 24 * 60 * 60 * 1000,
+          path: "/",
+        })
+
+        return res.json({
+          success: true,
+          message: "Email verified successfully. Your account has been created.",
+          user: {
+            id: user.id,
+            name: user.name,
+            email: user.email,
+            role: user.role,
+            profileImage: user.profile_image,
+            college: user.college,
+            city: user.city,
+          },
+          accessToken,
+          autoLogin: true,
+        })
+      } else {
+        // Existing user - just verify email
+        const user = await User.findByEmail(email)
+        if (!user) {
+          return res.status(404).json({
+            success: false,
+            error: "User not found",
+          })
+        }
+
+        if (user.is_email_verified) {
+          return res.status(400).json({
+            success: false,
+            error: "Email already verified",
+          })
+        }
+
+        // Mark user as verified
+        await User.updateEmailVerification(user.id)
+        await OTP.deleteByEmail(email.toLowerCase())
+
+      console.log("[AUTH] Email verified for:", email)
+
+        // Send verification success email
+        await emailService.sendVerificationSuccessEmail(email, user.name)
+
+        // Log verification
+        await AuditLog.create({
+          userId: user.id,
+          action: "OTP_VERIFY",
+          email,
+          ipAddress,
+          userAgent,
+          status: "SUCCESS",
+        })
+
+        // Generate tokens for auto-login after verification
+        const accessToken = tokenManager.generateAccessToken(user.id, user.role)
+        const refreshToken = tokenManager.generateRefreshToken(user.id)
+
+        // Create session
+        await tokenManager.createSession(
+          user.id,
+          accessToken,
+          refreshToken,
+          ipAddress,
+          userAgent
+        )
+
+        // Set cookies
+        res.cookie("accessToken", accessToken, {
+          httpOnly: true,
+          secure: process.env.NODE_ENV === "production",
+          sameSite: "lax",
+          maxAge: 15 * 60 * 1000,
+          path: "/",
+        })
+        res.cookie("refreshToken", refreshToken, {
+          httpOnly: true,
+          secure: process.env.NODE_ENV === "production",
+          sameSite: "lax",
+          maxAge: 7 * 24 * 60 * 60 * 1000,
+          path: "/",
+        })
+
+        return res.json({
+          success: true,
+          message: "Email verified successfully.",
+          user: {
+            id: user.id,
+            name: user.name,
+            email: user.email,
+            role: user.role,
+            profileImage: user.profile_image,
+            college: user.college,
+            city: user.city,
+          },
+          accessToken,
+          autoLogin: true,
+        })
+      }
     } catch (error) {
       console.error("[AUTH] Verify OTP error:", error.message)
       next(error)
     }
   },
 
-  // Resend OTP
-  async resendOTP(req, res, next) {
-    try {
-      const { email } = req.body
-      const ipAddress = getClientIP(req)
-      const userAgent = getUserAgent(req)
+  // Resend OTP
+  async resendOTP(req, res, next) {
+    try {
+      const { email } = req.body
+      const ipAddress = getClientIP(req)
+      const userAgent = getUserAgent(req)
 
-      console.log("[AUTH] OTP resend attempt for:", email)
+      console.log("[AUTH] OTP resend attempt for:", email)
 
-      // Find user
-      const user = await User.findByEmail(email)
-      if (!user) {
-        return res.status(404).json({
-          success: false,
-          error: "User not found",
-        })
-      }
+      // Check if this is a new registration (has data in cache) or existing user verification
+      const registrationData = registrationCacheManager.get(email.toLowerCase())
 
-      // Check if already verified
-      if (user.is_email_verified) {
-        return res.status(400).json({
-          success: false,
-          error: "Email already verified",
-        })
-      }
+      // If no registration data in cache, check if user exists (for email verification resend)
+      if (!registrationData) {
+        const user = await User.findByEmail(email)
+        if (!user) {
+          return res.status(404).json({
+            success: false,
+            error: "No pending registration or user found",
+          })
+        }
 
-      // Delete old OTP
-      await OTP.deleteByEmail(email.toLowerCase())
+        // Check if already verified
+        if (user.is_email_verified) {
+          return res.status(400).json({
+            success: false,
+            error: "Email already verified",
+          })
+        }
+      }
 
-      // Generate new OTP
-      const otp = generateOTP()
-      const expiresAt = getOTPExpiry()
+      // Delete old OTP
+      await OTP.deleteByEmail(email.toLowerCase())
 
-      await OTP.create({
-        email: email.toLowerCase(),
-        otp,
-        expiresAt,
-      })
+      // Generate new OTP
+      const otp = generateOTP()
+      const expiresAt = getOTPExpiry()
 
-      // Send OTP email
-      await emailService.sendOTPEmail(email, otp, user.name)
+      // If this is a new registration, update cache with new expiry
+      if (registrationData) {
+        registrationCacheManager.set(email.toLowerCase(), registrationData, expiresAt)
+      }
+
+      await OTP.create({
+        email: email.toLowerCase(),
+        otp,
+        expiresAt,
+      })
+
+      // Send OTP email - use name from registration data or user
+      const name = registrationData?.name || (await User.findByEmail(email))?.name || email
+      await emailService.sendOTPEmail(email, otp, name)
 
       // Log OTP resent
       await AuditLog.create({
@@ -503,10 +635,11 @@ export const authController = {
       status: "SUCCESS",
     })
 
-    // 9️⃣ Return user info (tokens are in cookies)
+    // 9️⃣ Return user info and access token (refresh token is in cookie)
     res.json({
       success: true,
       message: "Login successful",
+      accessToken: accessToken, // Also return in response for frontend to store
       user: {
         id: user.id,
         name: user.name,
@@ -515,6 +648,7 @@ export const authController = {
         profileImage: user.profile_image,
         college: user.college,
         city: user.city,
+        phone: user.phone,
       },
     })
   } catch (error) {
@@ -733,6 +867,59 @@ async logout(req, res, next) {
       })
     } catch (error) {
       console.error("[AUTH] Logout error:", error.message)
+      next(error)
+    }
+  },
+
+  // Update user profile
+  async updateProfile(req, res, next) {
+    try {
+      const userId = req.user.userId
+      const updates = req.body
+      const ipAddress = getClientIP(req)
+      const userAgent = getUserAgent(req)
+
+      console.log("[AUTH] Profile update attempt for user:", userId)
+
+      // Update user
+      const updatedUser = await User.update(userId, updates)
+
+      if (!updatedUser) {
+        return res.status(400).json({
+          success: false,
+          error: "No valid fields to update",
+        })
+      }
+
+      // Log profile update
+      await AuditLog.create({
+        userId,
+        action: "UPDATE_PROFILE",
+        email: updatedUser.email,
+        ipAddress,
+        userAgent,
+        status: "SUCCESS",
+        details: `Updated fields: ${Object.keys(updates).join(", ")}`,
+      })
+
+      res.json({
+        success: true,
+        message: "Profile updated successfully",
+        user: {
+          id: updatedUser.id,
+          name: updatedUser.name,
+          email: updatedUser.email,
+          role: updatedUser.role,
+          phone: updatedUser.phone,
+          college: updatedUser.college,
+          city: updatedUser.city,
+          profileImage: updatedUser.profile_image,
+          rating: updatedUser.rating,
+          totalRatings: updatedUser.total_ratings,
+        },
+      })
+    } catch (error) {
+      console.error("[AUTH] Update profile error:", error.message)
       next(error)
     }
   },
