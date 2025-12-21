@@ -597,8 +597,8 @@ export const authController = {
     }
 
     // 5️⃣ Generate tokens first
-    const accessToken = tokenManager.generateAccessToken(user.id, user.role)
-    const refreshToken = tokenManager.generateRefreshToken(user.id)
+    const accessToken = tokenManager.generateAccessToken(user.id, user.role, null)
+    const refreshToken = tokenManager.generateRefreshToken(user.id, null)
 
     // 6️⃣ Create session with tokens
     const session = await tokenManager.createSession(
@@ -967,6 +967,156 @@ async refreshToken(req, res, next) {
     res.json({ success: true, accessToken: newAccessToken })
   } catch (error) {
     console.error("[AUTH] Refresh token error:", error.message)
+    next(error)
+  }
+},
+
+// Change password
+async changePassword(req, res, next) {
+  try {
+    const { currentPassword, newPassword } = req.body
+    const userId = req.user.userId
+
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({
+        success: false,
+        error: "Current password and new password are required",
+      })
+    }
+
+    // Find user with password
+    const user = await User.findByIdWithPassword(userId)
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: "User not found",
+      })
+    }
+
+    // Verify current password
+    const isPasswordValid = await User.verifyPassword(currentPassword, user.password)
+    if (!isPasswordValid) {
+      return res.status(401).json({
+        success: false,
+        error: "Current password is incorrect",
+      })
+    }
+
+    // Validate new password strength
+    const passwordStrength = validatePasswordStrength(newPassword)
+    if (!passwordStrength.isStrong) {
+      return res.status(400).json({
+        success: false,
+        error: "Password does not meet security requirements",
+        requirements: passwordStrength.requirements,
+      })
+    }
+
+    // Update password
+    await User.updatePassword(userId, newPassword)
+
+    console.log("[AUTH] Password changed for user:", userId)
+
+    res.json({
+      success: true,
+      message: "Password changed successfully",
+    })
+  } catch (error) {
+    console.error("[AUTH] Change password error:", error.message)
+    next(error)
+  }
+},
+
+// Upload profile image
+async uploadProfileImage(req, res, next) {
+  try {
+    const userId = req.user.userId
+    const { profileImage } = req.body
+    
+    console.log("[AUTH] Uploading profile image for user:", userId)
+    console.log("[AUTH] Image data length:", profileImage?.length || 0, "bytes")
+    
+    // Check if image was provided
+    if (!profileImage) {
+      return res.status(400).json({
+        success: false,
+        error: "No image provided",
+      })
+    }
+
+    // Validate base64 format
+    if (!profileImage.startsWith('data:image/')) {
+      console.error("[AUTH] Invalid image format. Starts with:", profileImage.substring(0, 50))
+      return res.status(400).json({
+        success: false,
+        error: "Invalid image format. Please provide a valid image.",
+      })
+    }
+
+    // Validate size (base64 is roughly 33% larger than original, so ~2.7MB limit for <2MB original)
+    const maxSize = 2.7 * 1024 * 1024
+    if (profileImage.length > maxSize) {
+      console.error("[AUTH] Image too large:", profileImage.length, "bytes (max:", maxSize, ")")
+      return res.status(400).json({
+        success: false,
+        error: "Image size too large. Please compress and try again.",
+      })
+    }
+
+    // Convert base64 to buffer and save to file
+    const fs = await import('fs').then(m => m.promises)
+    const path = await import('path').then(m => m.default)
+    const { fileURLToPath } = await import('url')
+    const { dirname } = await import('path')
+    
+    const __filename = fileURLToPath(import.meta.url)
+    const __dirname = dirname(__filename)
+    
+    // Extract base64 data (remove "data:image/jpeg;base64," prefix)
+    const base64Data = profileImage.replace(/^data:image\/\w+;base64,/, '')
+    const imageBuffer = Buffer.from(base64Data, 'base64')
+    
+    // Generate unique filename
+    const timestamp = Date.now()
+    const filename = `profile_${userId}_${timestamp}.jpg`
+    const uploadsDir = path.join(__dirname, '..', 'uploads')
+    const filepath = path.join(uploadsDir, filename)
+    
+    // Ensure uploads directory exists
+    try {
+      await fs.mkdir(uploadsDir, { recursive: true })
+    } catch (mkdirError) {
+      console.error("[AUTH] Failed to create uploads directory:", mkdirError)
+    }
+    
+    // Save file to disk
+    await fs.writeFile(filepath, imageBuffer)
+    console.log("[AUTH] Profile image saved to:", filepath)
+    
+    // Store relative URL path in database instead of base64
+    const imageUrl = `/uploads/${filename}`
+    
+    // Update user profile image with URL instead of base64
+    console.log("[AUTH] Updating database for user:", userId)
+    const result = await User.updateProfileImage(userId, imageUrl)
+    
+    if (!result) {
+      throw new Error("Failed to update profile image in database")
+    }
+
+    console.log("[AUTH] Profile image URL updated successfully for user:", userId)
+
+    res.json({
+      success: true,
+      message: "Profile image uploaded successfully",
+      profileImage: imageUrl,
+    })
+  } catch (error) {
+    console.error("[AUTH] Upload profile image error:", {
+      message: error.message,
+      stack: error.stack,
+      userId: req.user?.userId
+    })
     next(error)
   }
 },
