@@ -262,12 +262,17 @@ export const authController = {
           })
           console.log("[AUTH] User created after OTP verification:", user.id)
           
+          // Mark user as verified
+          await User.updateEmailVerification(user.id)
+          user.is_email_verified = true
+          
           // Remove registration data from cache
           registrationCacheManager.delete(email.toLowerCase())
         } else {
           // User exists but not verified - mark as verified
           if (!user.is_email_verified) {
             await User.updateEmailVerification(user.id)
+            user.is_email_verified = true
           }
           // Remove registration data from cache
           registrationCacheManager.delete(email.toLowerCase())
@@ -432,10 +437,11 @@ export const authController = {
 
       // Check if this is a new registration (has data in cache) or existing user verification
       const registrationData = registrationCacheManager.get(email.toLowerCase())
+      let user = null
 
       // If no registration data in cache, check if user exists (for email verification resend)
       if (!registrationData) {
-        const user = await User.findByEmail(email)
+        user = await User.findByEmail(email)
         if (!user) {
           return res.status(404).json({
             success: false,
@@ -474,20 +480,9 @@ export const authController = {
       const name = registrationData?.name || (await User.findByEmail(email))?.name || email
       await emailService.sendOTPEmail(email, otp, name)
 
-      // Log OTP resent
-      await AuditLog.create({
-        userId: user.id,
-        action: "OTP_RESEND",
-        email,
-        ipAddress,
-        userAgent,
-        status: "SUCCESS",
-      })
-
-      console.log("[AUTH] OTP resent for:", email)
-
-      res.json({
-        success: true,
+      // Log OTP resent
+      await AuditLog.create({
+        userId: user?.id || null,
         message: "OTP resent successfully. Check your email.",
         email: user.email,
       })
