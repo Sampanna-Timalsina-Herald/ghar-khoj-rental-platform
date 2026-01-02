@@ -1,48 +1,68 @@
-import { tokenManager } from "../utils/token-manager.js"
+import { tokenManager } from "../utils/token-manager.js";
 
 export const authMiddleware = async (req, res, next) => {
   try {
-    const token = req.headers.authorization?.split(" ")[1]
+    let token = null;
+
+    // 1️⃣ Try reading token from httpOnly cookie
+    if (req.cookies?.accessToken) {
+      token = req.cookies.accessToken;
+      console.log("[AUTH] Token from cookie");
+    }
+
+    // 2️⃣ Fallback to Authorization header
+    if (!token && req.headers.authorization?.startsWith("Bearer ")) {
+      token = req.headers.authorization.split(" ")[1];
+      console.log("[AUTH] Token from Authorization header");
+    }
 
     if (!token) {
-      return res.status(401).json({ error: "No token provided" })
+      console.log("[AUTH] No token provided");
+      return res.status(401).json({ error: "No token provided" });
     }
 
-    // Check if token is blacklisted
-    const isBlacklisted = await tokenManager.isTokenBlacklisted(token)
+    // 3️⃣ Check blacklist
+    const isBlacklisted = await tokenManager.isTokenBlacklisted(token);
     if (isBlacklisted) {
-      return res.status(401).json({ error: "Token has been revoked" })
+      console.log("[AUTH] Token is blacklisted");
+      return res.status(401).json({ error: "Token has been revoked" });
     }
 
-    const decoded = tokenManager.verifyToken(token)
+    // 4️⃣ Verify token (expiry handled here)
+    const decoded = tokenManager.verifyToken(token);
     if (!decoded) {
-      return res.status(401).json({ error: "Invalid or expired token" })
+      console.log("[AUTH] Token verification failed");
+      return res.status(401).json({ error: "Invalid or expired token" });
     }
 
-    req.user = decoded
-    next()
+    console.log("[AUTH] Token verified successfully. UserId:", decoded.userId, "Role:", decoded.role);
+
+    req.user = decoded;
+    req.token = token;
+    next();
   } catch (error) {
-    res.status(401).json({ error: "Authentication failed" })
+    console.error("AUTH MIDDLEWARE ERROR:", error.message);
+    return res.status(401).json({ error: "Authentication failed" });
   }
-}
+};
 
 export const requireRole = (allowedRoles) => {
   return (req, res, next) => {
     if (!req.user) {
-      return res.status(401).json({ error: "Authentication required" })
+      return res.status(401).json({ error: "Authentication required" });
     }
 
     if (!allowedRoles.includes(req.user.role)) {
       return res.status(403).json({
         error: `Access denied. Required roles: ${allowedRoles.join(", ")}`,
-      })
+      });
     }
 
-    next()
-  }
-}
+    next();
+  };
+};
 
-export const adminMiddleware = requireRole(["admin"])
-export const landlordMiddleware = requireRole(["landlord", "admin"])
-export const tenantMiddleware = requireRole(["tenant"])
-export const studentMiddleware = tenantMiddleware // backward compatibility alias
+export const adminMiddleware = requireRole(["admin"]);
+export const landlordMiddleware = requireRole(["landlord", "admin"]);
+export const tenantMiddleware = requireRole(["tenant"]);
+export const studentMiddleware = tenantMiddleware;
