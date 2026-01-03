@@ -167,6 +167,18 @@ export class User {
     await query(text, [userId]);
   }
 
+  static async updateProfileImage(userId, imageData) {
+    const text = `
+      UPDATE users
+      SET profile_image = $2,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $1
+      RETURNING id, profile_image
+    `;
+    const result = await query(text, [userId, imageData]);
+    return result.rows[0];
+  }
+
   // --- UTILITY METHODS ---
   static async verifyPassword(plainPassword, hashedPassword) {
     return bcrypt.compare(plainPassword, hashedPassword);
