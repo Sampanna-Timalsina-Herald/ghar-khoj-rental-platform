@@ -18,51 +18,27 @@ export const setupSocketEvents = (io, socket) => {
 
   // ============ MESSAGE EVENTS ============
 
-  // Send message
+  // Send message - Socket only handles real-time delivery, not persistence
+  // Messages are saved via REST API to prevent duplicates
   socket.on("send-message", async (data) => {
     try {
       const { receiverId, message, listingId, conversationId } = data
 
-      // Save message to database via REST API
-      const savedMessage = await socketService.saveMessage(null, userId, receiverId, message, listingId)
+      console.log(`[SOCKET MESSAGE] ${userId} -> ${receiverId}: ${message} (for real-time only)`)
 
-      // Update unread count for receiver
-      if (conversationId) {
-        await socketService.incrementUnreadCount(conversationId, receiverId)
-      }
-
-      // Emit to sender
-      socket.emit("message-sent", {
-        id: savedMessage.id,
-        conversation_id: savedMessage.conversation_id,
-        sender_id: userId,
-        receiver_id: receiverId,
-        message: savedMessage.message,
-        created_at: savedMessage.created_at,
-        is_read: false,
-      })
-
-      // Emit to receiver if online
+      // Notify receiver if online
       const receiverSocketId = socketService.getUserSocket(receiverId)
       if (receiverSocketId) {
-        io.to(receiverSocketId).emit("receive-message", {
-          id: savedMessage.id,
-          conversation_id: savedMessage.conversation_id,
+        io.to(receiverSocketId).emit("message-notification", {
           sender_id: userId,
-          receiver_id: receiverId,
-          message: savedMessage.message,
-          created_at: savedMessage.created_at,
-          is_read: false,
+          conversation_id: conversationId,
+          message: "New message received",
+          timestamp: new Date(),
         })
-      } else {
-        // Send email notification if receiver is offline
-        await socketService.sendMessageNotification(receiverId, userId, message)
       }
-
-      console.log(`[MESSAGE] ${userId} -> ${receiverId}: ${message}`)
     } catch (error) {
       console.error("[SEND MESSAGE ERROR]", error)
-      socket.emit("error", { message: "Failed to send message" })
+      socket.emit("error", { message: "Failed to send message notification" })
     }
   })
 
