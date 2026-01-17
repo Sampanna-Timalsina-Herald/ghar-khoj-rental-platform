@@ -1,6 +1,7 @@
 import express from "express";
 import { query } from "../config/database.js";
 import { authMiddleware, adminMiddleware } from "../middleware/auth-enhanced.js";
+import { NotificationService } from "../services/notification-service.js";
 
 const router = express.Router();
 
@@ -44,11 +45,20 @@ router.get("/listings", authMiddleware, adminMiddleware, async (req, res) => {
 router.put("/listings/:id/approve", authMiddleware, adminMiddleware, async (req, res) => {
   try {
     const result = await query(
-      "UPDATE listings SET is_verified = true, status = 'active' WHERE id = $1 RETURNING *",
+      "UPDATE listings SET is_verified = true, status = 'active', admin_notes = NULL WHERE id = $1 RETURNING *",
       [req.params.id]
     );
 
-    res.json({ success: true, data: result.rows[0] });
+    const listing = result.rows[0];
+    
+    // Send notification to landlord
+    await NotificationService.notifyLandlordApproved(
+      listing.landlord_id,
+      listing.title,
+      listing.id
+    );
+
+    res.json({ success: true, data: listing });
   } catch (error) {
     console.error("[admin] Error approving listing:", error);
     res.status(500).json({ success: false, error: error.message });
@@ -60,14 +70,108 @@ router.put("/listings/:id/approve", authMiddleware, adminMiddleware, async (req,
 ===================================================== */
 router.put("/listings/:id/reject", authMiddleware, adminMiddleware, async (req, res) => {
   try {
+    const { reason } = req.body;
+    const adminId = req.user.userId;
+    
+    // Get admin details
+    const adminResult = await query(
+      "SELECT id, name, email FROM users WHERE id = $1",
+      [adminId]
+    );
+    const admin = adminResult.rows[0];
+    
+    // Create rejection details object
+    const rejectDetails = {
+      adminId: adminId,
+      adminName: admin.name || admin.email,
+      adminEmail: admin.email,
+      message: reason || 'Listing rejected by admin',
+      rejectedAt: new Date().toISOString(),
+      changeType: 'listing_rejected'
+    };
+    
     const result = await query(
-      "UPDATE listings SET status = 'inactive' WHERE id = $1 RETURNING *",
-      [req.params.id]
+      `UPDATE listings 
+       SET status = 'inactive', 
+           admin_notes = $2,
+           admin_id = $3,
+           admin_changes_seen = false,
+           admin_changes_seen_at = NULL,
+           admin_changes_details = $4
+       WHERE id = $1 
+       RETURNING *`,
+      [req.params.id, reason || 'Listing rejected by admin', adminId, JSON.stringify(rejectDetails)]
     );
 
-    res.json({ success: true, data: result.rows[0] });
+    const listing = result.rows[0];
+    
+    // Send notification to landlord
+    await NotificationService.notifyLandlordRejected(
+      listing.landlord_id,
+      listing.title,
+      reason || 'Listing rejected by admin',
+      listing.id
+    );
+
+    res.json({ success: true, data: listing });
   } catch (error) {
     console.error("[admin] Error rejecting listing:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/* =====================================================
+   REQUEST CHANGES TO LISTING
+===================================================== */
+router.put("/listings/:id/request-changes", authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const { message } = req.body;
+    const adminId = req.user.userId;
+    
+    // Get admin details
+    const adminResult = await query(
+      "SELECT id, name, email FROM users WHERE id = $1",
+      [adminId]
+    );
+    const admin = adminResult.rows[0];
+    
+    // Create change details object
+    const changeDetails = {
+      adminId: adminId,
+      adminName: admin.name || admin.email,
+      adminEmail: admin.email,
+      message: message || 'Please review and update this listing',
+      requestedAt: new Date().toISOString(),
+      changeType: 'changes_requested'
+    };
+    
+    const result = await query(
+      `UPDATE listings 
+       SET status = 'active', 
+           is_verified = false, 
+           admin_notes = $2,
+           admin_id = $3,
+           admin_changes_seen = false,
+           admin_changes_seen_at = NULL,
+           admin_changes_details = $4
+       WHERE id = $1 
+       RETURNING *`,
+      [req.params.id, message || 'Please review and update this listing', adminId, JSON.stringify(changeDetails)]
+    );
+
+    const listing = result.rows[0];
+    
+    // Send notification to landlord
+    await NotificationService.notifyLandlordChangesRequested(
+      listing.landlord_id,
+      listing.title,
+      message || 'Please review and update this listing',
+      listing.id
+    );
+
+    res.json({ success: true, data: listing });
+  } catch (error) {
+    console.error("[admin] Error requesting changes:", error);
     res.status(500).json({ success: false, error: error.message });
   }
 });

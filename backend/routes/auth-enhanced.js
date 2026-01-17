@@ -18,6 +18,10 @@ router.post("/resend-otp", validateResendOTP, asyncHandler(authController.resend
 router.post("/login", validateLogin, asyncHandler(authController.login))
 router.post("/refresh-token", asyncHandler(authController.refreshToken))
 
+// Password Reset
+router.post("/forgot-password", asyncHandler(authController.forgotPassword))
+router.post("/reset-password", asyncHandler(authController.resetPassword))
+
 // Protected routes
 router.get("/me", authMiddleware, asyncHandler(authController.getCurrentUser))
 router.post("/logout", authMiddleware, asyncHandler(authController.logout))
