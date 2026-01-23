@@ -2,6 +2,7 @@ import express from "express";
 import { query } from "../config/database.js";
 import { authMiddleware, adminMiddleware } from "../middleware/auth-enhanced.js";
 import { NotificationService } from "../services/notification-service.js";
+import { notifyMatchingUsers } from "../utils/preference-matcher.js";
 
 const router = express.Router();
 
@@ -51,12 +52,28 @@ router.put("/listings/:id/approve", authMiddleware, adminMiddleware, async (req,
 
     const listing = result.rows[0];
     
+    console.log("[ADMIN] Listing approved:", {
+      id: listing.id,
+      title: listing.title,
+      city: listing.city,
+      rent_amount: listing.rent_amount,
+      bedrooms: listing.bedrooms,
+      type: listing.type
+    });
+    
     // Send notification to landlord
     await NotificationService.notifyLandlordApproved(
       listing.landlord_id,
       listing.title,
       listing.id
     );
+
+    // Notify users with matching preferences (async, don't wait for response)
+    console.log("[ADMIN] Triggering preference matching for listing:", listing.id);
+    notifyMatchingUsers(listing).catch(err => {
+      console.error("[ADMIN] Error notifying matching users:", err);
+      console.error("[ADMIN] Error stack:", err.stack);
+    });
 
     res.json({ success: true, data: listing });
   } catch (error) {
