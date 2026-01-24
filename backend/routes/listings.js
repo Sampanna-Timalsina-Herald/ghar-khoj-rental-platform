@@ -77,7 +77,10 @@ router.get("/suggest", asyncHandler(async (req, res) => {
 
     const searchTerm = q.trim();
     
-    // Search across title, description, city, address, college_name - return actual listings with all needed fields
+    // Check if search term is a number (for rent amount search)
+    const isNumericSearch = !isNaN(searchTerm) && searchTerm !== '';
+    
+    // Search across title, description, city, address, college_name, and rent_amount
     const result = await query(`
       SELECT 
         id,
@@ -102,17 +105,19 @@ router.get("/suggest", asyncHandler(async (req, res) => {
           OR LOWER(city) LIKE LOWER($1)
           OR LOWER(address) LIKE LOWER($1)
           OR LOWER(college_name) LIKE LOWER($1)
+          ${isNumericSearch ? 'OR rent_amount::text LIKE $2' : ''}
         )
       ORDER BY 
         CASE 
           WHEN LOWER(title) LIKE LOWER($1) THEN 0
           WHEN LOWER(address) LIKE LOWER($1) THEN 1
           WHEN LOWER(city) LIKE LOWER($1) THEN 2
+          ${isNumericSearch ? 'WHEN rent_amount::text LIKE $2 THEN 1' : ''}
           ELSE 3 
         END,
         created_at DESC
       LIMIT 8
-    `, [`%${searchTerm}%`]);
+    `, isNumericSearch ? [`%${searchTerm}%`, `%${searchTerm}%`] : [`%${searchTerm}%`]);
 
     console.log("[listings/suggest] Results found:", result.rows.length);
     
@@ -347,10 +352,8 @@ router.post("/", authMiddleware, upload.array('images', 20), asyncHandler(async 
       newListing.title
     );
 
-    // Notify users with matching preferences (async, don't wait)
-    notifyMatchingUsers(newListing).catch(err => {
-      console.error("[CREATE-LISTING] Error notifying users:", err);
-    });
+    // Note: We don't notify matching users here because the listing isn't verified yet.
+    // Users will be notified only when the admin approves the listing.
 
     res.status(201).json({
       success: true,
