@@ -39,6 +39,8 @@ import recommendationRoutes from "./routes/recommendations.js"
 import bookingsRoutes from "./routes/bookings.js"
 import adminCommissionRoutes from "./routes/adminCommission.js"
 import landlordCommissionRoutes from "./routes/landlordCommission.js"
+import adminAnalyticsRoutes from "./routes/adminAnalytics.js"
+import adminSettingsRoutes from "./routes/adminSettings.js"
 import mlScheduler from "./services/ml-scheduler.js"
 
 const app = express()
@@ -148,6 +150,8 @@ app.use("/api/messages", messagesRoutes)
 app.use("/api/agreements", agreementsRoutes)
 app.use("/api/ratings", ratingsRoutes)
 app.use("/api/admin", adminRoutes)
+app.use("/api/admin/analytics", adminAnalyticsRoutes)
+app.use("/api/admin/settings", adminSettingsRoutes)
 app.use("/api/preferences", preferencesRoutes)
 app.use("/api/notifications", notificationsRoutes)
 app.use("/api/recommendations", recommendationRoutes)
