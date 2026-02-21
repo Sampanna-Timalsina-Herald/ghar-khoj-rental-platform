@@ -191,13 +191,33 @@ app.use((err, req, res, next) => {
   })
 })
 
-httpServer.listen(PORT, () => {
-  console.log(`[SERVER] Running on port ${PORT}`)
-  console.log(`[ENV] Node environment: ${config.NODE_ENV}`)
-  console.log(`[DB] PostgreSQL: ${config.DB_HOST}:${config.DB_PORT}/${config.DB_NAME}`)
-  console.log(`[SOCKET.IO] WebSocket server initialized`)
-  
-  // Start ML scheduler for automatic model training and recommendation generation
-  mlScheduler.start()
-  console.log(`[ML SCHEDULER] Started - Will train models and generate recommendations automatically`)
+let activePort = Number(PORT)
+
+const startServer = (portToTry) => {
+  activePort = Number(portToTry)
+
+  httpServer.listen(activePort, () => {
+    console.log(`[SERVER] Running on port ${activePort}`)
+    console.log(`[ENV] Node environment: ${config.NODE_ENV}`)
+    console.log(`[DB] PostgreSQL: ${config.DB_HOST}:${config.DB_PORT}/${config.DB_NAME}`)
+    console.log(`[SOCKET.IO] WebSocket server initialized`)
+
+    // Start ML scheduler for automatic model training and recommendation generation
+    mlScheduler.start()
+    console.log(`[ML SCHEDULER] Started - Will train models and generate recommendations automatically`)
+  })
+}
+
+httpServer.on("error", (error) => {
+  if (error.code === "EADDRINUSE") {
+    const nextPort = activePort + 1
+    console.warn(`[SERVER] Port ${activePort} is in use. Retrying on port ${nextPort}...`)
+    setTimeout(() => startServer(nextPort), 500)
+    return
+  }
+
+  console.error("[SERVER] Failed to start:", error)
+  process.exit(1)
 })
+
+startServer(activePort)
