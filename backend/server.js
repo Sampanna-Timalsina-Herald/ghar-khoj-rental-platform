@@ -44,6 +44,7 @@ import adminSettingsRoutes from "./routes/adminSettings.js"
 import subscriptionRoutes from "./routes/subscriptions.js"
 import paymentRoutes from "./routes/payments.js"
 import mlScheduler from "./services/ml-scheduler.js"
+import subscriptionReminderScheduler from "./services/subscription-reminder-scheduler.js"
 
 const app = express()
 const httpServer = createServer(app)
@@ -205,6 +206,10 @@ const startServer = (portToTry) => {
     // Start ML scheduler for automatic model training and recommendation generation
     mlScheduler.start()
     console.log(`[ML SCHEDULER] Started - Will train models and generate recommendations automatically`)
+
+    // Start subscription reminder scheduler for automatic expiry notifications
+    subscriptionReminderScheduler.start()
+    console.log(`[SUBSCRIPTION REMINDER] Started - Will check for expiring subscriptions and send reminders at 10, 7, 3, and 1 days before expiry`)
   })
 }
 

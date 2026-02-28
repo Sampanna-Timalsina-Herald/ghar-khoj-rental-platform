@@ -278,5 +278,79 @@ export class NotificationService {
       console.error('[NOTIFICATION SERVICE] Error details:', error.message, error.stack);
     }
   }
+
+  /**
+   * Notify landlord when subscription is about to expire
+   */
+  static async notifySubscriptionExpiring(landlordId, planName, daysRemaining, subscriptionId) {
+    try {
+      console.log(`[NOTIFICATION SERVICE] Creating subscription expiry notification for landlord ${landlordId} - ${daysRemaining} days remaining`);
+      
+      let icon = '⏰';
+      let urgency = 'warning';
+      let message = '';
+
+      if (daysRemaining === 1) {
+        icon = '🚨';
+        urgency = 'urgent';
+        message = `Your ${planName} subscription expires in 24 hours! Renew now to avoid service interruption.`;
+      } else if (daysRemaining <= 3) {
+        icon = '⚠️';
+        urgency = 'high';
+        message = `Your ${planName} subscription expires in ${daysRemaining} days. Renew soon to continue enjoying premium features.`;
+      } else if (daysRemaining <= 7) {
+        urgency = 'medium';
+        message = `Your ${planName} subscription expires in ${daysRemaining} days. Consider renewing to maintain uninterrupted service.`;
+      } else {
+        urgency = 'low';
+        message = `Your ${planName} subscription expires in ${daysRemaining} days. Plan ahead and renew when convenient.`;
+      }
+
+      await Notification.create({
+        userId: landlordId,
+        type: 'subscription_expiring',
+        title: `${icon} Subscription Expiring Soon`,
+        message: message,
+        link: `/landlord/subscription`,
+        metadata: { 
+          subscriptionId,
+          daysRemaining,
+          urgency,
+          expiryWarningAt: new Date().toISOString()
+        }
+      });
+      
+      console.log(`[NOTIFICATION SERVICE] Subscription expiry notification created - ${daysRemaining} days warning`);
+    } catch (error) {
+      console.error('[NOTIFICATION SERVICE] Error notifying landlord about subscription expiry:', error);
+      console.error('[NOTIFICATION SERVICE] Error details:', error.message, error.stack);
+    }
+  }
+
+  /**
+   * Notify landlord when subscription has expired
+   */
+  static async notifySubscriptionExpired(landlordId, planName, subscriptionId) {
+    try {
+      console.log(`[NOTIFICATION SERVICE] Creating subscription expired notification for landlord ${landlordId}`);
+      
+      await Notification.create({
+        userId: landlordId,
+        type: 'subscription_expired',
+        title: '❌ Subscription Expired',
+        message: `Your ${planName} subscription has expired. Renew now to restore access to premium features and keep your listings active.`,
+        link: `/landlord/subscription`,
+        metadata: { 
+          subscriptionId,
+          expiredAt: new Date().toISOString()
+        }
+      });
+      
+      console.log('[NOTIFICATION SERVICE] Subscription expired notification created');
+    } catch (error) {
+      console.error('[NOTIFICATION SERVICE] Error notifying landlord about subscription expired:', error);
+      console.error('[NOTIFICATION SERVICE] Error details:', error.message, error.stack);
+    }
+  }
 }
 
