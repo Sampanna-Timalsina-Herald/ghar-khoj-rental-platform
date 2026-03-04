@@ -43,6 +43,7 @@ import adminAnalyticsRoutes from "./routes/adminAnalytics.js"
 import adminSettingsRoutes from "./routes/adminSettings.js"
 import subscriptionRoutes from "./routes/subscriptions.js"
 import paymentRoutes from "./routes/payments.js"
+import locationRoutes from "./routes/locations.js"
 import mlScheduler from "./services/ml-scheduler.js"
 import subscriptionReminderScheduler from "./services/subscription-reminder-scheduler.js"
 
@@ -163,6 +164,7 @@ app.use("/api/admin/commissions", adminCommissionRoutes)
 app.use("/api/landlord/commissions", landlordCommissionRoutes)
 app.use("/api/subscriptions", subscriptionRoutes)
 app.use("/api/payments", paymentRoutes)
+app.use("/api/locations", locationRoutes)
 
 // Health check
 app.get("/health", (req, res) => {
