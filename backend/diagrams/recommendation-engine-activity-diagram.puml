@@ -1,0 +1,165 @@
+@startuml Recommendation Engine Activity Diagram
+title Recommendation Engine - Activity Diagram
+
+|System|
+start
+
+:Start nightly cron job;
+
+== Data Collection & Processing ==
+
+fork
+  :Collect user explicit preferences
+  (location, budget, property type, amenities);
+fork again
+  :Aggregate implicit behavior signals
+  (views, favorites, search queries, time spent);
+fork again
+  :Extract listing features
+  (description, amenities, location, price);
+end fork
+
+:Build feature vector pipeline;
+:Generate user preference vectors;
+:Create listing embeddings using TF-IDF;
+
+== ML Model Execution ==
+
+:Apply k-means clustering
+to group similar properties;
+
+if (User has sufficient history?) then (yes)
+  :Calculate hybrid score:
+  60% explicit preferences
+  + 40% implicit signals;
+  :Rank listings by relevance score;
+  :Select top recommendations;
+else (no - Cold Start)
+  :Fetch popular/trending listings
+  in user's region;
+  :Apply basic filters
+  (budget, property type);
+  :Select fallback recommendations;
+endif
+
+:Store recommendations in database;
+:Cache results in Redis (24h TTL);
+:Log refresh timestamp;
+
+== User Interaction ==
+
+|Tenant|
+:Log in to platform;
+:View dashboard;
+:See "Recommended for You" section;
+
+repeat
+  :Browse recommended listings;
+  
+  if (Action taken?) then (view listing)
+    |System|
+    :Track view event;
+    :Update behavior signals;
+    :Increment engagement metrics;
+    |Tenant|
+  elseif (Action taken?) then (add to favorites)
+    |System|
+    :Track favorite event;
+    :Increase preference weight for similar listings;
+    :Update CTR metrics;
+    |Tenant|
+  elseif (Action taken?) then (submit inquiry)
+    |System|
+    :Track inquiry event;
+    :Record conversion metric;
+    :Boost relevance score for similar properties;
+    |Tenant|
+  elseif (Action taken?) then (click "Not Interested")
+    |System|
+    :Record negative feedback;
+    :Hide listing from future recommendations;
+    :Update exclusion list;
+    :Refine algorithm parameters;
+    |Tenant|
+    :Remove listing from view with animation;
+  elseif (Action taken?) then (click "Why this?")
+    |System|
+    :Fetch explanation via /explain/:id;
+    :Analyze matching factors;
+    :Generate human-readable reasons;
+    |Tenant|
+    :View tooltip with matching criteria
+    (e.g., "Matches your budget and preferred location");
+  endif
+  
+backward :Continue browsing;
+repeat while (More recommendations to view?) is (yes)
+->no;
+
+== Weekly Email Digest ==
+
+|System|
+:Check day and time;
+if (Monday 9 AM?) then (yes)
+  fork
+    :Query top 5 recommendations per user;
+    :Include new arrivals matching preferences;
+    :Generate personalized email template;
+    :Send weekly digest email;
+  end fork
+  
+  |Tenant|
+  :Receive email notification;
+  if (Click email link?) then (yes)
+    :Redirect to platform;
+    :View recommended listings;
+  endif
+endif
+
+== Admin Monitoring ==
+
+|Admin|
+fork
+  :Open recommendation analytics dashboard;
+  :View performance metrics:
+  - Click-through rate (CTR)
+  - Saves/favorites count
+  - Inquiries from recommendations;
+  :Analyze weekly trend charts;
+  :Review breakdown by property type and location;
+  
+  if (Quality issues detected?) then (yes)
+    :Click pause/resume toggle;
+    |System|
+    :Disable recommendation engine globally;
+    :Update status to 'Paused';
+    :Log admin action;
+    :Display pause status indicator;
+    |Admin|
+    :Investigate and fix issues;
+    :Resume engine when ready;
+    |System|
+    :Re-enable recommendations;
+    :Update status to 'Active';
+  endif
+end fork
+
+== Continuous Improvement ==
+
+|System|
+repeat
+  :Collect feedback loop data;
+  :Analyze hidden/flagged listings;
+  :Calculate recommendation accuracy;
+  :Fine-tune scoring weights;
+  :Update ML model parameters;
+  :Optimize query performance;
+backward :Wait for next refresh cycle;
+repeat while (Next nightly cron job?) is (not yet)
+->triggered;
+
+:Repeat recommendation generation;
+
+stop
+
+@enduml

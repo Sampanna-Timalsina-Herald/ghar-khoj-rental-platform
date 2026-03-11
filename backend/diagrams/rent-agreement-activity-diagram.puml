@@ -1,0 +1,123 @@
+@startuml Rent Agreement Activity Diagram
+title Rent Agreement Module - Activity Diagram
+
+|Landlord|
+start
+:Select property for agreement;
+:Fill agreement terms
+(rent amount, duration, special terms);
+:Generate draft agreement;
+
+|System|
+:Create RentAgreement record
+(status: draft);
+:Generate PDF template
+with dynamic fields;
+:Store draft in database;
+:Send notification to landlord;
+
+|Landlord|
+:Review draft agreement;
+if (Agreement terms correct?) then (no)
+  :Edit terms
+  (modify rent, duration, conditions);
+  |System|
+  :Update agreement record;
+  :Regenerate PDF;
+  :Log changes in audit trail;
+  |Landlord|
+else (yes)
+endif
+
+:Finalize and send to tenant;
+
+|System|
+:Update status to 'pending_signatures';
+:Send email notification to tenant;
+:Send notification to landlord;
+
+|Tenant|
+:Receive agreement notification;
+:View agreement details;
+if (Agree to terms?) then (no)
+  :Reject agreement;
+  |System|
+  :Update status to 'rejected';
+  :Notify landlord of rejection;
+  |Landlord|
+  :Receive rejection notice;
+  stop
+else (yes)
+endif
+
+:Open e-signature interface;
+:Sign agreement digitally
+(canvas drawing or typed signature);
+
+|System|
+:Validate signature;
+:Add timestamp to signature;
+:Generate signature hash;
+:Update status to 'signed';
+:Store signed PDF in uploads;
+:Send confirmation email to both parties;
+:Log signing action in audit trail;
+
+|Landlord|
+fork
+  :Receive signing confirmation;
+  :Download signed agreement;
+fork again
+  |Tenant|
+  :Receive signing confirmation;
+  :Download signed agreement;
+end fork
+
+|System|
+:Check agreement start date;
+if (Start date reached?) then (yes)
+  :Update status to 'active';
+  :Send activation notification;
+else (no)
+  :Wait for start date;
+endif
+
+:Monitor agreement duration;
+
+repeat
+  :Check daily for agreement status;
+  if (48 hours before end date?) then (yes)
+    :Send reminder notification;
+  endif
+  
+  if (Agreement unsigned after 7 days?) then (yes)
+    :Send reminder to tenant;
+  endif
+  
+  if (No action after 14 days?) then (yes)
+    :Send escalation email to landlord;
+  endif
+backward :Continue monitoring;
+repeat while (Agreement end date reached?) is (no)
+->yes;
+
+:Update status to 'expired';
+:Send expiry notification to both parties;
+:Archive agreement;
+
+|Admin|
+fork
+  :Monitor all agreements in master table;
+  :Search/filter agreements;
+  if (Invalid agreement found?) then (yes)
+    :Soft delete agreement;
+    |System|
+    :Hide agreement (not erase);
+    :Notify involved parties;
+    :Log deletion in audit trail;
+  endif
+end fork
+
+stop
+
+@enduml
