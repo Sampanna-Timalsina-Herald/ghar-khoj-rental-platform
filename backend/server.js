@@ -38,6 +38,7 @@ import notificationsRoutes from "./routes/notifications.js"
 import recommendationRoutes from "./routes/recommendations.js"
 import bookingsRoutes from "./routes/bookings.js"
 import adminCommissionRoutes from "./routes/adminCommission.js"
+import adminReportRoutes from "./routes/adminReports.js"
 import landlordCommissionRoutes from "./routes/landlordCommission.js"
 import adminAnalyticsRoutes from "./routes/adminAnalytics.js"
 import adminSettingsRoutes from "./routes/adminSettings.js"
@@ -161,6 +162,7 @@ app.use("/api/notifications", notificationsRoutes)
 app.use("/api/recommendations", recommendationRoutes)
 app.use("/api/bookings", bookingsRoutes)
 app.use("/api/admin/commissions", adminCommissionRoutes)
+app.use("/api/admin/reports", adminReportRoutes)
 app.use("/api/landlord/commissions", landlordCommissionRoutes)
 app.use("/api/subscriptions", subscriptionRoutes)
 app.use("/api/payments", paymentRoutes)

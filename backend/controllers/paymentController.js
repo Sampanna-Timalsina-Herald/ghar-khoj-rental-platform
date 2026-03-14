@@ -26,7 +26,10 @@ export const initiatePayment = async (req, res) => {
       customer_info,
       purchase_order_name,
       billing_cycle, // For subscriptions: 'monthly' or 'annual'
-      auto_renew // For subscriptions: true/false
+      auto_renew, // For subscriptions: true/false
+      purpose, // Optional: 'rent'
+      booking_id, // Optional: booking id for rent payments
+      payment_mode // Optional: 'first' | 'monthly' | 'full'
     } = req.body;
 
     // Validate required fields
@@ -132,7 +135,10 @@ export const initiatePayment = async (req, res) => {
         metadata: {
           billing_cycle: billing_cycle || 'monthly',
           auto_renew: auto_renew || false,
-          purchase_order_name: purchase_order_name
+          purchase_order_name: purchase_order_name,
+          purpose: purpose || null,
+          booking_id: booking_id || null,
+          payment_mode: payment_mode || null
         },
         // Store initial payment response
         initiation_response: paymentResponse
@@ -267,7 +273,10 @@ export const verifyPayment = async (req, res) => {
     const updatedPayment = await Payment.updatePaymentStatus(payment.id, {
       status: verificationResponse.success ? 'completed' : 'failed',
       gateway_transaction_id: verificationResponse.transaction_id,
-      gateway_response: verificationResponse,
+      gateway_response: {
+        ...verificationResponse,
+        metadata: storedResponse.metadata || null
+      },
       verified_at: new Date()
     });
     
@@ -309,6 +318,29 @@ export const verifyPayment = async (req, res) => {
         }
       } else if (payment.payment_type === 'commission') {
         console.log(`[PAYMENT VERIFY] Commission payment completed: ${payment.reference_id}`);
+        
+        // Update commission transaction with payment_id and mark as paid
+        try {
+          const { query } = await import('../config/database.js');
+          await query(`
+            UPDATE commission_transactions 
+            SET 
+              payment_id = $1,
+              payment_status = 'paid',
+              payment_method = $2,
+              payment_reference = $3,
+              payment_date = NOW()
+            WHERE id = $4
+          `, [
+            updatedPayment.id,
+            payment.gateway,
+            verificationResponse.transaction_id || payment.transaction_uuid,
+            payment.reference_id
+          ]);
+          console.log(`[PAYMENT VERIFY] ✓ Commission transaction updated with payment_id`);
+        } catch (commissionError) {
+          console.error(`[PAYMENT VERIFY] ✗ Failed to update commission transaction:`, commissionError);
+        }
       }
 
       // Generate and send payment receipt
@@ -470,6 +502,94 @@ export const getMyPayments = async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Failed to fetch payment history'
+    });
+  }
+};
+
+/**
+ * Get landlord's received payments (rent income)
+ */
+export const getLandlordPayments = async (req, res) => {
+  try {
+    const landlordId = req.user.userId;
+    
+    // Get all bookings for this landlord
+    const { query } = await import('../config/database.js');
+    
+    const paymentsQuery = `
+      SELECT 
+        p.*,
+        b.listing_id,
+        b.tenant_id,
+        l.title as listing_title,
+        l.address as listing_address,
+        u.name as tenant_name,
+        u.email as tenant_email
+      FROM payments p
+      INNER JOIN bookings b ON p.reference_id::text = b.id::text
+      INNER JOIN listings l ON b.listing_id = l.id
+      INNER JOIN users u ON b.tenant_id = u.id
+      WHERE l.landlord_id = $1
+      AND p.payment_type = 'commission'
+      AND (p.gateway_response::jsonb->'metadata'->>'purpose') = 'rent'
+      AND p.status = 'completed'
+      ORDER BY p.created_at DESC
+    `;
+    
+    const result = await query(paymentsQuery, [landlordId]);
+    
+    res.json({
+      success: true,
+      data: result.rows
+    });
+  } catch (error) {
+    console.error('Error fetching landlord payments:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch landlord payments'
+    });
+  }
+};
+
+/**
+ * Get tenant's rent payments
+ */
+export const getTenantRentPayments = async (req, res) => {
+  try {
+    const tenantId = req.user.userId;
+    
+    const { query } = await import('../config/database.js');
+    
+    const paymentsQuery = `
+      SELECT 
+        p.*,
+        b.listing_id,
+        b.landlord_id,
+        l.title as listing_title,
+        l.address as listing_address
+      FROM payments p
+      INNER JOIN bookings b ON p.reference_id::text = b.id::text
+      INNER JOIN listings l ON b.listing_id = l.id
+      WHERE b.tenant_id = $1
+      AND p.payment_type = 'commission'
+      AND (p.gateway_response::jsonb->'metadata'->>'purpose') = 'rent'
+      AND p.status = 'completed'
+      ORDER BY p.created_at DESC
+    `;
+    
+    const result = await query(paymentsQuery, [tenantId]);
+    
+    console.log('[PAYMENT] getTenantRentPayments - Found', result.rows.length, 'payments for tenant', tenantId);
+    
+    res.json({
+      success: true,
+      data: result.rows
+    });
+  } catch (error) {
+    console.error('Error fetching tenant rent payments:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch rent payments'
     });
   }
 };
@@ -875,6 +995,8 @@ export default {
   verifyPayment,
   getPaymentDetails,
   getMyPayments,
+  getLandlordPayments,
+  getTenantRentPayments,
   getAllPayments,
   getPaymentAnalytics,
   refundPayment,
