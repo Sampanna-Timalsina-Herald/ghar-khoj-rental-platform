@@ -1,6 +1,7 @@
 import User from "../models/User.js"
 import OTP from "../models/OTP.js"
 import AuditLog from "../models/AuditLog.js"
+import UserLocation from "../models/UserLocation.js"
 import { emailService } from "../utils/email-service.js"
 import { generateOTP, getOTPExpiry } from "../utils/otp-generator.js"
 import { tokenManager } from "../utils/token-manager.js"
@@ -630,6 +631,8 @@ export const authController = {
       status: "SUCCESS",
     })
 
+    const hasLocation = await UserLocation.hasLocation(user.id)
+
     // 9️⃣ Return user info and access token (refresh token is in cookie)
     res.json({
       success: true,
@@ -644,7 +647,9 @@ export const authController = {
         college: user.college,
         city: user.city,
         phone: user.phone,
+        hasLocation,
       },
+      locationRequired: !hasLocation,
     })
   } catch (error) {
     console.error("[AUTH] Login error:", error.message)
@@ -808,23 +813,26 @@ export const authController = {
         })
       }
 
-      res.json({
-        success: true,
-        user: {
-          id: user.id,
-          name: user.name,
-          email: user.email,
-          role: user.role,
-          isEmailVerified: user.is_email_verified,
-          isActive: user.is_active,
-          profileImage: user.profile_image,
-          college: user.college,
-          city: user.city,
-          rating: user.rating,
-          totalRatings: user.total_ratings,
-          createdAt: user.created_at,
-        },
-      })
+      const hasLocation = await UserLocation.hasLocation(user.id)
+
+      res.json({
+        success: true,
+        user: {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          role: user.role,
+          isEmailVerified: user.is_email_verified,
+          isActive: user.is_active,
+          profileImage: user.profile_image,
+          college: user.college,
+          city: user.city,
+          rating: user.rating,
+          totalRatings: user.total_ratings,
+          createdAt: user.created_at,
+          hasLocation,
+        },
+      })
     } catch (error) {
       console.error("[AUTH] Get current user error:", error.message)
       next(error)
