@@ -13,18 +13,16 @@ export class UserPreferences {
 
   // Create or update user preferences
   static async upsert(userId, preferences) {
-    const {
-      locations = [],
-      minPrice = null,
-      maxPrice = null,
-      bedrooms = null,
-      propertyTypes = [],
-      amenities = [],
-      hasSetPreferences = true
-    } = preferences;
-
-    // Check if preferences exist
+    // Check if preferences exist (used as fallback to avoid overwriting other fields)
     const existing = await this.getByUserId(userId);
+
+    const locations = preferences.locations ?? existing?.locations ?? [];
+    const minPrice = preferences.minPrice ?? existing?.min_price ?? null;
+    const maxPrice = preferences.maxPrice ?? existing?.max_price ?? null;
+    const bedrooms = preferences.bedrooms ?? existing?.bedrooms ?? null;
+    const propertyTypes = preferences.propertyTypes ?? existing?.property_types ?? [];
+    const amenities = preferences.amenities ?? existing?.amenities ?? [];
+    const hasSetPreferences = preferences.hasSetPreferences ?? existing?.has_set_preferences ?? true;
 
     if (existing) {
       // Update existing preferences
