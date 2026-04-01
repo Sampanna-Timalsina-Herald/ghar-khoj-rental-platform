@@ -152,6 +152,7 @@ export const authMiddleware = async (req, res, next) => {
     if (!session) return res.status(401).json({ error: "Session not found" })
 
     req.user = {
+      userId: session.user_id,
       id: session.user_id,
       role: session.role,
       isActive: session.is_active
